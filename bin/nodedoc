@@ -1,0 +1,277 @@
+#!perl
+use strict;
+use warnings;
+
+package MyApp;
+use Smart::Options;
+use Scalar::Util qw(looks_like_number);
+
+sub new {
+    my $class = shift;
+    my $argv  = Smart::Options->new
+              ->options(
+                    h   => { alias   => 'help' },
+                    dir => { default => '.' },
+                    ls  => { alias   => 'list' },
+                    l   => { alias   => 'loc' },
+                    p   => { alias   => 'package_json' },
+                    r   => { alias   => 'readme' },
+                    m   => { alias   => 'module' },
+                    lib => { alias   => 'library' },
+              )->boolean(qw(
+                    help list tree
+              ))->parse;
+
+    if (defined $argv->{with}) {
+        $argv->{with} =~ /^(p|r|m)$/ or
+            die qq("with" option must be "p" or "r" or "m");
+    }
+
+    if (defined $argv->{_}->[0]) {
+        $argv->{readme} = shift @{$argv->{_}};
+    }
+
+    for my $key (qw/loc package_json readme module library/) {
+        if ( defined $argv->{$key}
+          && looks_like_number($argv->{$key})
+          && $argv->{$key} == '1'
+        ) {
+                die $key eq 'library'
+                   ?    qq("library" must be relative path from "main" js)
+                   :    qq("$key" must be "module name");
+        }
+    }
+
+    bless $argv, $class;
+}
+
+sub argvd {
+    my $self = shift;
+    my($key, $val) = @_;
+    $self->{$key} = $val if defined $val;
+    $self->{$key};
+}
+
+sub test {
+    my $self = shift;
+    my $cb   = pop;
+    if ((scalar grep{ defined $self->argvd($_) }@_) != scalar @_) {
+        return;
+    }
+    $cb->();
+    exit 0;
+}
+
+1;
+
+package main;
+use strict;
+use warnings;
+use File::Basename;
+use Nodedoc;
+
+my $app = MyApp->new;
+my $nd  = Nodedoc->new( delete $app->{'dir'} );
+
+$app->test(qw/help/ => sub { help() });
+$app->test(qw/list/ => sub { list('list') });
+$app->test(qw/tree/ => sub { list('tree') });
+$app->test(qw/loc with/       => sub { find_path() });
+$app->test(qw/loc library/    => sub { library() });
+$app->test(qw/package_json/   => sub { display_package_json() });
+$app->test(qw/readme/         => sub { display() });
+$app->test(qw/module library/ => sub { library("display contents") });
+$app->test(qw/module/         => sub { display() });
+$app->test(qw/loc/ => sub { find_path() });
+
+help("something wrong. also option");
+
+exit 1;
+
+sub _print_content {
+    my $file = shift;
+    print do {
+        local $/;
+        open my $fh, '<', $file or die $!;
+        <$fh>;
+    };
+    exit 0;
+}
+
+sub library {
+    my($content_flg) = @_;
+    find_path(sub {
+        my $main   = shift;
+        my $lib_js = Nodedoc::Find::resolve(
+                        File::Basename::dirname($main),
+                        $app->argvd('library')
+                   );
+
+        $lib_js or die $app->argvd('library') . " not found";
+
+        if ($content_flg) {
+            _print_content( $lib_js );
+        }
+
+        print $lib_js;
+        exit 0;
+    });
+}
+sub display {
+    find_path(sub { _print_content( shift ) });
+}
+
+sub display_package_json {
+    my $mod_name = $app->argvd('package_json');
+    defined $mod_name or die qq(mod_name not found);
+    $nd->find($mod_name => sub {
+        my $mod = shift;
+        if (defined $mod->{package_json}) {
+            if (defined $mod->{package_json}{data}{readme}) {
+                $mod->{package_json}{data}{readme} = qq(> "$0 -r mod_name");
+            }
+            require YAML;
+            print YAML::Dump($mod->{package_json}{data});
+            exit 0;
+        }
+    });
+    die qq("$mod_name" not found);
+}
+
+sub find_path {
+    my($cb) = @_;
+    my $mod_name  = _find_path_resolve_mod_name();
+    $nd->find( $mod_name => sub {
+        my $mod  = shift;
+        my $mode = _find_path_resolve_mode();
+        if (my $file = _find_path_resolve_path( $mod, $mode )) {
+            if (ref $cb eq 'CODE') {
+                $cb->($file);
+                exit 0;
+            }
+            print $file;
+            exit 0;
+        }
+        die qq("$mod_name" has not $mode file);
+    });
+    die qq("$mod_name" not found);
+}
+sub _find_path_resolve_mod_name {
+    for (qw/loc module readme package_json/) { # この並び重要
+        return $app->argvd($_) if defined $app->argvd($_);
+    }
+    die qq(can not resolve module name);
+}
+sub _find_path_resolve_mode {
+    my %mode_map = (
+        m => 'module',
+        p => 'package_json',
+        r => 'readme',
+    );
+    if (defined $app->argvd('loc')) {
+        return $mode_map{$app->argvd('with')} if defined $app->argvd('with');
+        return 'module';
+    }
+    for (qw/module readme package_json/) {
+        return $_ if defined $app->argvd($_);
+    }
+    die qq(can not resolve mode type);
+}
+sub _find_path_resolve_path {
+    my($mod, $mode) = @_;
+    if ($mode =~ /^(package_json|readme)$/) {
+        if ($mod->{$mode}) {
+            return $mod->{$mode}{file};
+        }
+        return;
+    }
+    $mod->{main};
+}
+
+sub list {
+    my($list_mode) = @_;
+    my $mode = $list_mode eq 'tree' ? 'make_modules_tree'
+                                    : 'make_modules_list';
+
+    for my $mod_name (sort{uc $a cmp uc $b} keys %{$nd->$mode->modules}) {
+        my $mod  = $nd->module($mod_name);
+        my $ver  = $mod->{version} || 'version.not.found';
+        my $main = $mod->{main}    || '!failed main js not found';
+        print "$mod_name\@$ver\t$main\n";
+
+        if ($list_mode eq 'tree') {
+            _loop($mod, 1);
+        }
+    }
+}
+
+sub _loop {
+    my($mod, $i) = @_;
+    my $dependences = $mod->{dependences};
+
+    return if ! $dependences;
+
+    for (keys %{$dependences}) {
+        my $child = $dependences->{$_};
+        print( "    " x $i . "$child->{name}\n" );
+        _loop($child, $i + 1);
+    }
+}
+
+sub help {
+    my $message = shift;
+    if($message) {
+        die<<"DYING_MESSAGE";
+
+nodedoc v$Nodedoc::VERSION - display the document of Node.js modules
+
+    error: $message
+
+Show help: nodedoc -h
+
+DYING_MESSAGE
+;
+    }
+    print<<"HELP";
+
+nodedoc v$Nodedoc::VERSION - display the document of Node.js modules
+
+Usage:
+    nodedoc -h
+    nodedoc [-dir directory] [-ls |
+                              -tree |
+                              -l module_name [-with option | -lib relative_path] |
+                              -p module_name |
+                              -r module_name |
+                              -m module_name [-lib relative_path]]
+
+Options:
+    -h, --help          display help
+    -dir                directory that is started to scan
+    -ls, --list         dispaly modules list
+    -tree               dispaly modules list with dependences it
+    -l, --loc           display location abs path
+    -with               using with "loc" option. this option must be "p" or "r" or "m"
+    -lib, --library     using with "loc" option or "module" option.
+                         this option must be relative path from "main" js
+    -p, --package_json  display the contents of package.json
+    -r, --readme        dispaly the contents of README.(*)
+    -m, --module        dispaly the contents of "main" js
+
+Example:
+
+    nodedoc -l mongoose
+    nodedoc -l mongoose -with r              display mongoose's README path
+    nodedoc -r mongoose                      display mongoose's README contents
+    nodedoc -l mongoose -lib ./lib/index.js  display mongoose's library js
+
+ if you can use "mad".
+
+   nodedoc -r mongoose | mad -               display mongoo's README contents. it is parsed
+
+HELP
+;
+    exit 0;
+}
+__END__
+

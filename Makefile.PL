@@ -7,6 +7,7 @@ requires 'File::Spec';
 requires 'Cwd';
 requires 'JSON::pp';
 requires 'Smart::Options';  # for nodedoc
+requires 'Mouse::Util::TypeConstraints';  # for nodedoc
 requires 'Data::Validator'; # for nodedoc
 requires 'YAML';            # for nodedoc
 

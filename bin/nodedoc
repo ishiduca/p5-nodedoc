@@ -1,182 +1,143 @@
 #!perl
-package MyApp;
+package Cmd;
 use strict;
 use warnings;
-sub new {
-    my $cont = MyApp::Controler->new;
-    bless {
-        controler => $cont,
-        model     => MyApp::Model->new( delete $cont->{argv}{dir} ),
-        view      => MyApp::View->new,
-    }, shift;
-}
-1;
-
-package MyApp::Controler;
-use strict;
-use warnings;
-use Smart::Options;
-use Cwd          qw(cwd);
-use Scalar::Util qw(looks_like_number);
 sub new {
     my $class = shift;
-    my $argv  = Smart::Options->new
-                ->options(
-                    h   => { alias   => 'help' },
-                    dir => { default => cwd },
-                    ls  => { alias   => 'list' },
-                    l   => { alias   => 'loc' },
-                    p   => { alias   => 'package_json' },
-                    r   => { alias   => 'readme' },
-                    m   => { alias   => 'module' },
-                    lib => { alias   => 'library' },
-                )->boolean(qw{
-                    help list tree
-                })->parse;
-
-    if (defined $argv->{with}) {
-        $argv->{with} =~ /^(p|r|m)$/ or
-            die qq("with" option must be "p" or "r" or "m");
-    }
-
-    if (defined $argv->{_}->[0]) {
-        $argv->{readme} = shift @{$argv->{_}};
-    }
-
-    delete $argv->{_};
-
-    for my $key (qw/loc package_json readme module library/) {
-        if ( defined $argv->{$key}
-          && looks_like_number($argv->{$key})
-          && $argv->{$key} == 1
-        ) {
-            die $key eq 'library' ? qq("library" must be relative path)
-                                  : qq("$key" must be "module name");
-        }
-    }
-
-    bless { argv => $argv }, $class;
+    my $opts  = shift;
+    my $args  = delete $opts->{_};
+    bless {
+        opts => $opts,
+        args => $args,
+    }, $class;
 }
+sub validate {
+    my $self = shift;
+    my $validator = shift->with(qw( NoThrow ));
+    my $opts      = $validator->validate( %{$self->{opts}} );
 
+    if ($validator->has_errors) {
+        my $errors = $validator->clear_errors;
+        for my $err (@{$errors}) {
+            print $err->{message}, "\n";
+        }
+        die;
+    }
+
+    $self->{opts} = $opts;
+
+    $self;
+}
 sub test {
     my $self = shift;
     my $cb   = pop;
-    unless ( (scalar keys %{ $self->{argv} })             == scalar @_
-        &&   (scalar grep{ defined $self->{argv}{$_} }@_) == scalar @_
-    ) {
-        return;
-    }
-    $cb->($self->{argv});
+    return if scalar(keys %{$self->{opts}})              != scalar @_;
+    return if scalar(grep{ exists $self->{opts}{$_} }@_) != scalar @_;
+
+    $cb->($self->{opts}, $self->{args});
     exit 0;
 }
-
 1;
 
-package MyApp::Model;
+package main;
 use strict;
 use warnings;
-use parent qw{ Nodedoc };
+use Nodedoc;
+use Smart::Options;
+use Data::Validator;
+use Mouse::Util::TypeConstraints;
 
-1;
+subtype 'Cmd::Type::with'
+  => as      'Str'
+  => where   { /^[prm]$/ }
+  => message { qq("with" option must be "p" or "r" or "m") }
+;
 
-package MyApp::View;
-use strict;
-use warnings;
-sub new { bless {}, shift };
-sub list {
-    my($self, $model, $list_type) = @_;
-    my $make_list = $list_type eq 'list' ? 'make_modules_list'
-                                         : 'make_modules_tree';
-    my $list = $model->$make_list->modules;
-    for my $mod_name (sort {uc $a cmp uc $b} keys %{ $list }) {
-        my $mod  = $list->{$mod_name};
-        my $main = $mod->{main} || "main not found";
-        my $version = $mod->{version} || 'version.not.found';
-        print qq($mod_name\@$version\t$main\n);
-        $self->_loop($mod, 1) if $list_type eq 'tree';
-    }
-}
-sub _loop {
-    my($self, $mod, $i) = @_;
-    return if ! defined $mod->{dependences};
-    for my $child_name (keys %{$mod->{dependences}}) {
-        print( "    " x $i . "$child_name\n");
-        $self->_loop($mod->{dependences}{$child_name}, $i + 1);
-    }
-}
-sub _resolve_path {
-    my($self, $mod, $mode, $opt_library) = @_;
-    if ($mode eq 'module') {
-        return if ! $mod->{main};
-        return $mod->{main};
-    }
-    if ($mode =~ /^(package_json|readme)$/) {
-        if ($mod->{$mode} && $mod->{$mode}{file}) {
-            return $mod->{$mode}{file};
-        }
-        return;
-    }
-    if ($mode eq 'library' && defined $opt_library) {
-        return if ! $mod->{main};
-        require File::Basename;
-        require Nodedoc;
-        return Nodedoc::Find::resolve(
-                File::Basename::dirname( $mod->{main} ),
-                $opt_library,
-        );
-    }
-}
-sub _display {
-    my $self = shift;
-    my($cb, $model, $mod_name, $mode, $opt_library) = @_;
-    $model->find( $mod_name => sub {
-        my $mod  = shift;
-        if (my $file = $self->_resolve_path( $mod, $mode, $opt_library )) {
-            $cb->( $file );
-            exit 0;
-        }
-        die qq("$mod_name" has no "$mode" file);
+my $cmd = Cmd->new( Smart::Options->new
+  ->options(
+    h   => { alias => 'help' },
+    dir => { default => '.' },
+    ls  => { alias => 'list' },
+    l   => { alias => 'loc' },
+    m   => { alias => 'module' },
+    lib => { alias => 'library' },
+    p   => { alias => 'package_json' },
+    r   => { alias => 'readme' },
+  )
+  ->boolean(qw{
+    help list tree
+  })
+  ->demand('dir')
+  ->parse
+);
+
+$cmd->validate( Data::Validator->new(
+    help => { isa => 'Bool', optional => 1 },
+    list => { isa => 'Bool', optional => 1 },
+    tree => { isa => 'Bool', optional => 1 },
+    dir  => { isa => 'Str' },
+    loc          => { isa => 'Str', optional => 1 },
+    package_json => { isa => 'Str', optional => 1 },
+    module       => { isa => 'Str', optional => 1 },
+    readme       => { isa => 'Str', optional => 1 },
+    library      => { isa => 'Str', optional => 1 },
+    with         => { isa => 'Cmd::Type::with', optional => 1 },
+  )
+);
+
+my $nd = Nodedoc->new( delete $cmd->{opts}{dir} );
+
+$cmd->test(qw/help/ => sub { help() });
+$cmd->test(qw/list/ => sub { list($nd, 'list') });
+$cmd->test(qw/tree/ => sub { list($nd, 'tree') });
+$cmd->test(qw/loc with/ => sub {
+    my($opts, undef) = @_;
+    my %mode = (
+        p => 'package_json',
+        m => 'module',
+        r => 'readme',
+    );
+    display_path($nd, $opts->{loc}, $mode{$opts->{with}});
+});
+$cmd->test(qw/loc library/ => sub {
+    my($opts, undef) = @_;
+    display_path($nd, $opts->{loc}, 'library', $opts->{library});
+});
+$cmd->test(qw/loc/ => sub {
+    my($opts, undef) = @_;
+    display_path($nd, $opts->{loc}, 'module');
+});
+$cmd->test(qw/module library/ => sub {
+    my($opts, undef) = @_;
+    display_contents($nd, $opts->{module}, 'library', $opts->{library});
+});
+$cmd->test(qw/library/ => sub {
+    my($opts, $args) = @_;
+    $args->[0] or help(qq("module_name" not found));
+
+    display_contents($nd, $args->[0], 'library', $opts->{library});
+});
+
+for my $mode (qw/package_json readme module/) {
+    $cmd->test($mode => sub {
+        my($opts, undef) = @_;
+        display_contents($nd, $opts->{$mode}, $mode);
     });
-    die qq("$mod_name" not found);
 }
-sub display_path {
-    my $self = shift;
-    unshift @_, sub {print @_};
-    $self->_display(@_);
-}
-sub display_contents {
-    my $self = shift;
-    if ($_[2] eq 'package_json') {
-        $_[0]->find( $_[1] => sub {
-            my $mod = shift;
-            if ($mod->{package_json}) {
-                if (my $data = $mod->{package_json}{data}) {
-                    if ($data->{readme}) {
-                        $data->{readme} = qq(try `nodedoc -readme $mod->{name}`);
-                    }
-                    require YAML;
-                    print YAML::Dump($data);
-                }
-                die qq("$_[1]" has no "package.json");
-            }
-        });
-        die qq("$_[1]" not found);
-    }
 
-    unshift @_, sub {
-        my $file = shift;
-        print do {
-            local $/;
-            open my $fh, '<', $file or die $!;
-            <$fh>;
-        };
-    };
+$cmd->test(sub {
+    my(undef, $args) = @_;
+    $args->[0] or help(qq("module_name" not found));
 
-    $self->_display(@_);
-}
+    display_contents($nd, $args->[0], 'readme');
+});
+
+help(qq(Maybe option is wrong. \(wrong option name is used or different combination.\)));
+
+exit 0;
+
 sub help {
-    my($self, $message) = @_;
-    if($message) {
+    if(my $message = shift) {
         die<<"DYING_MESSAGE";
 
 nodedoc v$Nodedoc::VERSION - display the document of Node.js modules
@@ -200,7 +161,7 @@ Usage:
                               -p module_name |
                               -r module_name |
                               -m module_name [-lib relative_path]]
-
+  
 Options:
     -h, --help          display help
     -dir                directory that is started to scan
@@ -213,77 +174,116 @@ Options:
     -p, --package_json  display the contents of package.json
     -r, --readme        dispaly the contents of README.(*)
     -m, --module        dispaly the contents of "main" js
-
+   
 Example:
-
     nodedoc -l mongoose
     nodedoc -l mongoose -with r              display mongoose's README path
     nodedoc -r mongoose                      display mongoose's README contents
     nodedoc -l mongoose -lib ./lib/index.js  display mongoose's library js
+   
+    if you can use "mad".
 
- if you can use "mad".
-
-   nodedoc -r mongoose | mad -               display mongoose's README contents. it is parsed
+    nodedoc -r mongoose | mad -               display mongoose's README contents. it is parsed
 
 HELP
 ;
-
+    exit 0;
 }
+
+sub _resolve_path {
+    my($mod, $mode, $opt_library) = @_;
+    if ($mode eq 'module') {
+        return if ! $mod->{main};
+        return $mod->{main};
+    }
+    if ($mode =~ /^(package_json|readme)$/) {
+        if ($mod->{$mode} && $mod->{$mode}{file}) {
+            return $mod->{$mode}{file};
+        }
+        return;
+    }
+    if ($mode eq 'library' && defined $opt_library) {
+        return if ! $mod->{main};
+        require File::Basename;
+        return Nodedoc::Find::resolve(
+            File::Basename::dirname( $mod->{main} ), $opt_library
+        );
+    }
+}
+sub _display {
+    my($cb, $nd, $mod_name, $mode, $opt_library) = @_;
+    $nd->find( $mod_name => sub {
+        my $mod = shift;
+        if (my $file = _resolve_path( $mod, $mode, $opt_library)) {
+            $cb->( $file );
+            exit 0;
+        }
+        help(qq("$mod_name" has not "$mode" file));
+    });
+    help(qq("$mod_name" not found));
+}
+sub display_contents {
+    return _display_package_json_contents(@_) if $_[2] eq 'package_json';
+
+    unshift @_, sub {
+        my $file = shift;
+        print do {
+            local $/;
+            open my $fh, '<', $file or die $!;
+            <$fh>;
+        };
+    };
+
+    _display(@_);
+}
+sub display_path {
+    unshift @_, sub { print @_ };
+    _display(@_);
+}
+
+sub _display_package_json_contents {
+    my($nd, $mod_name, undef) = @_;
+    $nd->find( $mod_name => sub {
+        my $mod = shift;
+        if ($mod->{package_json}) {
+            if (my $data = $mod->{package_json}{data}) {
+                $data->{readme} = qq(try `nodedoc --readme $mod_name`)
+                    if defined $data->{readme};
+                require YAML;
+                print YAML::Dump($data);
+                exit 0;
+            }
+            die qq("$mod_name" has not "package_json");
+        }
+    });
+    help(qq("$mod_name" not found));
+}
+
+sub list {
+    my $nd = shift;
+    my $mode = shift || 'list';
+    my $make_modules_mode = $mode eq 'list' ? 'make_modules_list' : 'make_modules_tree';
+    my $modules = $nd->$make_modules_mode->modules;
+    for my $mod_name (sort{ uc $a cmp uc $b } keys %{$modules}) {
+        my $mod  = $nd->module( $mod_name );
+        my $ver  = $mod->{version} ? $mod->{version} : 'version.not.found';
+        my $main = $mod->{main}    ? $mod->{main}    : 'main not found';
+        print qq($mod_name\@$ver\t$main\n);
+        _loop($mod, 1) if $mode eq 'tree';
+    }
+}
+
+sub _loop {
+    my($mod, $i) = @_;
+    return if ! exists $mod->{dependences};
+
+    my $deps = $mod->{dependences};
+    for my $child_name (keys %{$deps}) {
+        my $child = $deps->{$child_name};
+        print( '    ' x $i . "$child->{name}\n");
+        _loop($child, $i + 1);
+    }
+}
+
 1;
-
-package main;
-use strict;
-use warnings;
-
-my $app   = MyApp->new;
-my $cont  = $app->{controler};
-my $model = $app->{model};
-my $view  = $app->{view};
-
-$cont->test(qw/help/ => sub { $view->help() });
-$cont->test(qw/module library/ => sub {
-    my $argv = shift;
-    $view->display_contents( $model, $argv->{module}, 'library',
-                             $argv->{library});
-});
-$cont->test(qw/module/ => sub {
-    my $argv = shift;
-    $view->display_contents( $model, $argv->{module}, 'module');
-});
-$cont->test(qw/package_json/ => sub {
-    my $argv = shift;
-    $view->display_contents( $model, $argv->{package_json}, 'package_json');
-});
-$cont->test(qw/readme/ => sub {
-    my $argv = shift;
-    $view->display_contents($model, $argv->{readme}, 'readme');
-});
-
-$cont->test(qw/loc with/ => sub {
-    my $argv = shift;
-    my $mod_name = $argv->{loc};
-    my %modes = (
-        p => 'package_json',
-        r => 'readme',
-        m => 'module',
-    );
-    my $mode = $modes{$argv->{with}};
-    $view->display_path($model, $mod_name, $mode);
-});
-$cont->test(qw/loc library/ => sub {
-    my $argv = shift;
-    $view->display_path($model, $argv->{loc}, 'library', $argv->{library});
-});
-$cont->test(qw/loc/ => sub {
-    my $argv = shift;
-    $view->display_path($model, $argv->{loc}, 'module');
-});
-$cont->test(qw/list/ => sub {
-    $view->list( $model, 'list');
-});
-$cont->test(qw/tree/ => sub {
-    $view->list( $model, 'tree');
-});
-
-exit 0;
 

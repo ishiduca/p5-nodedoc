@@ -6,9 +6,9 @@ requires 'File::Basename';
 requires 'File::Spec';
 requires 'Cwd';
 requires 'JSON::pp';
-requires 'Smart::Options'; # for nodedoc
-requires 'Scalar::Util';   # for nodedoc
-requires 'YAML';           # for nodedoc
+requires 'Smart::Options';  # for nodedoc
+requires 'Data::Validator'; # for nodedoc
+requires 'YAML';            # for nodedoc
 
 tests 't/*.t';
 #author_tests 'xt';

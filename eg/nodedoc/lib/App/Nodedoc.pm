@@ -4,7 +4,8 @@ use Dancer ':syntax';
 our $VERSION = '0.1';
 
 use Nodedoc;
-use Text::Markdown 'markdown';
+#use Text::Markdown 'markdown';
+use Text::Markdown::GitHubAPI 'markdown';
 
 set home => "$ENV{HOME}"; # set start to scanning directory
 
@@ -63,7 +64,7 @@ sub _send_file {
         return;
     }
 
-	if (request->uri =~ /readme/) {
+    if (request->uri =~ /readme/) {
         my $md = markdown do {
             local $/;
             open my $fh, '<', $file or send_error($!) and return;
@@ -71,7 +72,7 @@ sub _send_file {
         };
 
         return send_file( \$md, content_type => 'text/html');
-	}
+    }
 
     send_file( $file, system_path => 1 );
 }

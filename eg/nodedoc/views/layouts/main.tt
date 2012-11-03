@@ -1,0 +1,10 @@
+<!doctype html>
+<head>
+<meta http-equiv="Content-type" content="text/html; charset=[% settings.charset %]" />
+<title>nodedoc</title>
+<link rel="stylesheet" href="[% request.uri_base %]/css/normalize.css" />
+<link rel="stylesheet" href="[% request.uri_base %]/css/style.css" />
+</head>
+<body>
+[% content %]
+</body>

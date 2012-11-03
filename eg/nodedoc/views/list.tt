@@ -1,0 +1,33 @@
+<header>
+<div>
+<span class="navi_element"><a href="/">[HOME]</a></span>
+</div>
+</header>
+
+<div id="main">
+<h1><span style="font-size:medium;text/-decoration:none;">scanning form: </span>[% start_dir %]</h1>
+
+<ul>
+[% FOREACH stuff = mods -%]
+<li><span style="font-weight:bold;">[% stuff.mod_name %]</span><span style="color:#aaaaaa;">@[% stuff.version %]</span>
+[% IF stuff.package_json -%]
+[ <a href="/package_json?path=[% stuff.package_json %]" title="package.json">P</a> ]
+[% ELSE -%]
+[ <span title="[% stuff.mod_name %] has no package.json">_</span> ]
+[% END -%]
+[% IF stuff.readme -%]
+[ <a href="/readme?path=[% stuff.readme %]" title="README">R</a> ]
+[% ELSE -%]
+[ <span title="[% stuff.mod_name %] has no README">_</span> ]
+[% END -%]
+[% IF stuff.main -%]
+<a href="/main?path=[% stuff.main %]">[% stuff.main %]</a>
+[% ELSE -%]
+<span>main not found</span>
+[% END -%]
+</li>
+[% END -%]
+</ul>
+
+</div>
+

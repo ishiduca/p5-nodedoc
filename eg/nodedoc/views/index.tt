@@ -1,0 +1,12 @@
+<header>
+<h1>Nodedoc</h1>
+</header>
+
+<div id="main">
+<form method="GET" action="/list">
+<div class="form_element"><span style="font-weight:strong">input directory to start scanning modules</span></div>
+<div class="form_element"><input type="text" name="start_dir" id="start_dir" value="[% home %]" /></div>
+<div class="form_element"><button type="submit">scan start</button></div>
+</form>
+</div>
+

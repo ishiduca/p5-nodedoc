@@ -1,0 +1,12 @@
+<header>
+<div>
+<span class="navi_element"><a href="/">[HOME]</a></span>
+</div>
+</header>
+
+<div id="main">
+<h1>[% dir %] Not Found !</h1>
+<p>file &quot;[% file %]&quot; not found.</p>
+<a href="/">return to set up</a>
+</div>
+

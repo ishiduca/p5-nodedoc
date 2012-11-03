@@ -1,0 +1,36 @@
+
+html, html>body, body {
+margin: 0;
+margin-bottom: 25px;
+font-family: "Lucida Grande", "Bitstream Vera Sans", "Verdana";
+font-size: medium;
+color: #333;
+}
+
+header {
+	display: block;
+	padding: 0 12px;
+}
+
+h1 {
+	font-size: xx-large;
+	text-align : center;
+	text-decoration: underline;
+}
+
+div#main {
+	text-align : center;
+	padding : 12px;
+}
+div#main > form > div {
+	padding : 12px;
+}
+input#start_dir {
+	width : 560px;
+}
+
+li {
+	list-style-type: none;
+	margin : 8px 0;
+
+}

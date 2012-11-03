@@ -70,6 +70,7 @@ sub _send_file {
             open my $fh, '<', $file or send_error($!) and return;
             <$fh>;
         };
+        $md = qq(<link rel="stylesheet" href="/css/swiss.css" />\n) . $md;
 
         return send_file( \$md, content_type => 'text/html');
     }

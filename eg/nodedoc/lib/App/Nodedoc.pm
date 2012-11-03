@@ -1,4 +1,4 @@
-package nd;
+package App::Nodedoc;
 use Dancer ':syntax';
 
 our $VERSION = '0.1';
